@@ -5,176 +5,918 @@
     <meta charset="utf-8" />
     <title>Young Innovators STEM Lab</title>
     <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
+    <script>
+        /* ── Custom Components ────────────────────────────────── */
+
+        // Speech bubble that cycles through Q&A pairs
+        AFRAME.registerComponent('speech-bubble', {
+            schema: {
+                messages: { type: 'array', default: [] },
+                interval: { type: 'number', default: 5000 },
+                color: { type: 'color', default: '#FFFFFF' }
+            },
+            init: function () {
+                this.idx = 0;
+                this.textEl = this.el.querySelector('[text]');
+                this.bgEl = this.el.querySelector('.bubble-bg');
+                this.el.setAttribute('visible', false);
+            },
+            show: function (msg) {
+                this.textEl.setAttribute('text', 'value', msg);
+                this.el.setAttribute('visible', true);
+            },
+            hide: function () {
+                this.el.setAttribute('visible', false);
+            }
+        });
+
+        // Makes a student walk to a random spot and back, looping
+        AFRAME.registerComponent('random-walk', {
+            schema: {
+                speed: { type: 'number', default: 1 },
+                range: { type: 'number', default: 2 },
+                pause: { type: 'number', default: 3000 }
+            },
+            init: function () {
+                this.origin = this.el.getAttribute('position');
+                this.walking = false;
+                this.timer = 0;
+                this.pauseTimer = 0;
+                this.target = null;
+                this.returning = false;
+                this.pausing = false;
+                this.scheduleNextWalk();
+            },
+            scheduleNextWalk: function () {
+                this.nextWalkTime = performance.now() + 2000 + Math.random() * 8000;
+            },
+            tick: function (time, dt) {
+                if (!this.walking && !this.pausing) {
+                    if (time > this.nextWalkTime) {
+                        var r = this.data.range;
+                        this.target = {
+                            x: this.origin.x + (Math.random() - 0.5) * r * 2,
+                            y: this.origin.y,
+                            z: this.origin.z + (Math.random() - 0.5) * r * 2
+                        };
+                        this.walking = true;
+                        this.returning = false;
+                    }
+                    return;
+                }
+                if (this.pausing) {
+                    this.pauseTimer -= dt;
+                    if (this.pauseTimer <= 0) {
+                        this.pausing = false;
+                        if (!this.returning) {
+                            this.target = { x: this.origin.x, y: this.origin.y, z: this.origin.z };
+                            this.walking = true;
+                            this.returning = true;
+                        } else {
+                            this.walking = false;
+                            this.returning = false;
+                            this.scheduleNextWalk();
+                        }
+                    }
+                    return;
+                }
+                var pos = this.el.getAttribute('position');
+                var dx = this.target.x - pos.x;
+                var dz = this.target.z - pos.z;
+                var dist = Math.sqrt(dx * dx + dz * dz);
+                if (dist < 0.05) {
+                    this.walking = false;
+                    this.pausing = true;
+                    this.pauseTimer = this.data.pause;
+                    return;
+                }
+                var step = (this.data.speed * dt) / 1000;
+                pos.x += (dx / dist) * step;
+                pos.z += (dz / dist) * step;
+                // Face direction of movement
+                var angle = Math.atan2(dx, dz) * (180 / Math.PI);
+                this.el.setAttribute('rotation', { x: 0, y: angle, z: 0 });
+                this.el.setAttribute('position', pos);
+            }
+        });
+
+        // Teacher hand‑raise animation when answering
+        AFRAME.registerComponent('teacher-animate', {
+            init: function () {
+                this.arm = this.el.querySelector('.teacher-arm');
+            },
+            raise: function () {
+                if (!this.arm) return;
+                this.arm.setAttribute('animation', {
+                    property: 'rotation',
+                    to: '-140 0 0',
+                    dur: 400,
+                    easing: 'easeInOutQuad'
+                });
+                var arm = this.arm;
+                setTimeout(function () {
+                    arm.setAttribute('animation', {
+                        property: 'rotation',
+                        to: '0 0 0',
+                        dur: 400,
+                        easing: 'easeInOutQuad'
+                    });
+                }, 2000);
+            }
+        });
+
+        // Student hand‑raise animation
+        AFRAME.registerComponent('hand-raise', {
+            init: function () {
+                this.arm = this.el.querySelector('.student-arm');
+            },
+            raise: function () {
+                if (!this.arm) return;
+                this.arm.setAttribute('animation', {
+                    property: 'rotation',
+                    to: '-160 0 0',
+                    dur: 400,
+                    easing: 'easeInOutQuad'
+                });
+                var self = this;
+                setTimeout(function () {
+                    self.arm.setAttribute('animation', {
+                        property: 'rotation',
+                        to: '0 0 0',
+                        dur: 400,
+                        easing: 'easeInOutQuad'
+                    });
+                }, 3000);
+            }
+        });
+
+        /* ── Q&A loop controller ─────────────────────────────── */
+        AFRAME.registerComponent('qa-loop', {
+            init: function () {
+                this.qaPairs = [
+                    { q: "What is 2 + 2?", a: "It equals 4!" },
+                    { q: "What is H₂O?", a: "That's water!" },
+                    { q: "Why is the sky blue?", a: "Light scattering!" },
+                    { q: "What is gravity?", a: "A force of attraction!" },
+                    { q: "What is π?", a: "Approximately 3.14!" },
+                    { q: "Who invented the bulb?", a: "Thomas Edison!" },
+                    { q: "What is DNA?", a: "The blueprint of life!" },
+                    { q: "What is photosynthesis?", a: "Plants making food!" },
+                    { q: "What planet is red?", a: "Mars is red!" },
+                    { q: "What is E=mc²?", a: "Energy-mass relation!" }
+                ];
+                this.qaIndex = 0;
+                this.students = [];
+                this.teacher = null;
+                this.teacherBubble = null;
+                this.phase = 'idle';
+                this.phaseTimer = 0;
+                var self = this;
+                this.el.addEventListener('loaded', function () {
+                    setTimeout(function () {
+                        self.students = Array.from(document.querySelectorAll('.student-figure'));
+                        self.teacher = document.querySelector('#teacher');
+                        self.teacherBubble = document.querySelector('#teacher-bubble');
+                        self.studentBubbles = Array.from(document.querySelectorAll('.student-bubble'));
+                        self.activeStudent = null;
+                        self.startCycle();
+                    }, 1000);
+                });
+            },
+            startCycle: function () {
+                this.phase = 'pick';
+                this.phaseTimer = 1000;
+            },
+            tick: function (time, dt) {
+                if (this.phase === 'idle') return;
+                this.phaseTimer -= dt;
+                if (this.phaseTimer > 0) return;
+
+                var qa = this.qaPairs[this.qaIndex % this.qaPairs.length];
+
+                if (this.phase === 'pick') {
+                    // Pick random student to ask
+                    var idx = Math.floor(Math.random() * this.students.length);
+                    this.activeStudent = idx;
+                    var student = this.students[idx];
+                    if (student && student.components['hand-raise']) {
+                        student.components['hand-raise'].raise();
+                    }
+                    this.phase = 'question';
+                    this.phaseTimer = 1000;
+                }
+                else if (this.phase === 'question') {
+                    // Show student question bubble
+                    var bubble = this.studentBubbles[this.activeStudent];
+                    if (bubble && bubble.components['speech-bubble']) {
+                        bubble.components['speech-bubble'].show(qa.q);
+                    }
+                    this.phase = 'wait';
+                    this.phaseTimer = 3000;
+                }
+                else if (this.phase === 'wait') {
+                    // Hide student bubble, show teacher answer
+                    var sBubble = this.studentBubbles[this.activeStudent];
+                    if (sBubble && sBubble.components['speech-bubble']) {
+                        sBubble.components['speech-bubble'].hide();
+                    }
+                    if (this.teacher && this.teacher.components['teacher-animate']) {
+                        this.teacher.components['teacher-animate'].raise();
+                    }
+                    if (this.teacherBubble && this.teacherBubble.components['speech-bubble']) {
+                        this.teacherBubble.components['speech-bubble'].show(qa.a);
+                    }
+                    this.phase = 'answer';
+                    this.phaseTimer = 3500;
+                }
+                else if (this.phase === 'answer') {
+                    if (this.teacherBubble && this.teacherBubble.components['speech-bubble']) {
+                        this.teacherBubble.components['speech-bubble'].hide();
+                    }
+                    this.qaIndex++;
+                    this.phase = 'pick';
+                    this.phaseTimer = 2000 + Math.random() * 3000;
+                }
+            }
+        });
+    </script>
 </head>
 
 <body>
-    <a-scene>
+    <a-scene qa-loop>
 
-        <!-- Sky background -->
-        <a-sky color="#87CEEB"></a-sky>
+        <!-- ═══════════ SKY ═══════════ -->
+        <a-sky color="#6EC6FF"></a-sky>
 
-        <!-- Floor -->
-        <a-box position="0 0 0" width="10" height="0.1" depth="10" color="#8B7355"></a-box>
+        <!-- ═══════════ ROOM STRUCTURE ═══════════ -->
 
-        <!-- Walls -->
+        <!-- Floor – tiled look -->
+        <a-box position="0 0 0" width="12" height="0.1" depth="12" color="#C4A882"></a-box>
+        <!-- Floor pattern stripes -->
+        <a-box position="0 0.06 -3" width="12" height="0.01" depth="0.05" color="#B09070"></a-box>
+        <a-box position="0 0.06 0" width="12" height="0.01" depth="0.05" color="#B09070"></a-box>
+        <a-box position="0 0.06 3" width="12" height="0.01" depth="0.05" color="#B09070"></a-box>
+        <a-box position="-3 0.06 0" width="0.05" height="0.01" depth="12" color="#B09070"></a-box>
+        <a-box position="0 0.06 0" width="0.05" height="0.01" depth="12" color="#B09070"></a-box>
+        <a-box position="3 0.06 0" width="0.05" height="0.01" depth="12" color="#B09070"></a-box>
+
         <!-- Back wall -->
-        <a-box position="0 2.5 -5" width="10" height="5" depth="0.1" color="#E8E8E8"></a-box>
-
+        <a-box position="0 2.75 -6" width="12" height="5.5" depth="0.15" color="#FFF5E1"></a-box>
         <!-- Left wall -->
-        <a-box position="-5 2.5 0" width="0.1" height="5" depth="10" color="#F0F0F0"></a-box>
-
+        <a-box position="-6 2.75 0" width="0.15" height="5.5" depth="12" color="#FFF0D0"></a-box>
         <!-- Right wall -->
-        <a-box position="5 2.5 0" width="0.1" height="5" depth="10" color="#F0F0F0"></a-box>
+        <a-box position="6 2.75 0" width="0.15" height="5.5" depth="12" color="#FFF0D0"></a-box>
+        <!-- Front wall left -->
+        <a-box position="-4 2.75 6" width="4" height="5.5" depth="0.15" color="#FFF5E1"></a-box>
+        <!-- Front wall right -->
+        <a-box position="4 2.75 6" width="4" height="5.5" depth="0.15" color="#FFF5E1"></a-box>
+        <!-- Front wall top (above door) -->
+        <a-box position="0 4.75 6" width="4" height="1" depth="0.15" color="#FFF5E1"></a-box>
 
-        <!-- Front wall (partial - with door opening) -->
-        <a-box position="-2.5 2.5 5" width="5" height="5" depth="0.1" color="#F0F0F0"></a-box>
-        <a-box position="3.5 3.5 5" width="3" height="3" depth="0.1" color="#F0F0F0"></a-box>
+        <!-- Door frame -->
+        <a-box position="-1.05 2.1 6.05" width="0.12" height="4.2" depth="0.2" color="#5C3A1E"></a-box>
+        <a-box position="1.05 2.1 6.05" width="0.12" height="4.2" depth="0.2" color="#5C3A1E"></a-box>
+        <a-box position="0 4.2 6.05" width="2.2" height="0.12" depth="0.2" color="#5C3A1E"></a-box>
 
         <!-- Ceiling -->
-        <a-box position="0 5 0" width="10" height="0.1" depth="10" color="#FFFFFF"></a-box>
+        <a-box position="0 5.5 0" width="12" height="0.1" depth="12" color="#FAFAFA"></a-box>
 
-        <!-- Whiteboard on back wall -->
-        <a-box position="0 3 -4.9" width="4" height="2" depth="0.05"
-            src="https://www.teachoo.com/12837/3495/Double-Displacement-Reaction/category/Concepts/"></a-box>
-        <a-box position="0 3 -4.85" width="3.8" height="1.8" depth="0.02" rotation="0 180 0"
-            src="https://www.teachoo.com/12837/3495/Double-Displacement-Reaction/category/Concepts/"></a-box>
+        <!-- Ceiling lights -->
+        <a-box position="-2 5.4 -2" width="1.5" height="0.05" depth="0.3" color="#FFFFEE"
+            light="type:point;intensity:0.4;distance:8;color:#FFFFCC"></a-box>
+        <a-box position="2 5.4 -2" width="1.5" height="0.05" depth="0.3" color="#FFFFEE"
+            light="type:point;intensity:0.4;distance:8;color:#FFFFCC"></a-box>
+        <a-box position="-2 5.4 2" width="1.5" height="0.05" depth="0.3" color="#FFFFEE"
+            light="type:point;intensity:0.4;distance:8;color:#FFFFCC"></a-box>
+        <a-box position="2 5.4 2" width="1.5" height="0.05" depth="0.3" color="#FFFFEE"
+            light="type:point;intensity:0.4;distance:8;color:#FFFFCC"></a-box>
 
-        <!-- Teacher's Desk -->
-        <a-box position="0 0.4 -4" width="1.5" height="0.8" depth="0.8" color="#8B4513"></a-box>
-        <a-box position="0 0.8 -4" width="1.6" height="0.05" depth="0.9" color="#A0522D"></a-box>
+        <!-- Wall trim / baseboard -->
+        <a-box position="0 0.15 -5.95" width="12" height="0.2" depth="0.05" color="#8B6F47"></a-box>
+        <a-box position="-5.95 0.15 0" width="0.05" height="0.2" depth="12" color="#8B6F47"></a-box>
+        <a-box position="5.95 0.15 0" width="0.05" height="0.2" depth="12" color="#8B6F47"></a-box>
 
-        <!-- Student Desks Row 1 (Left) -->
-        <a-box position="-2 0.4 -1" width="1.2" height="0.8" depth="0.6" color="#CD853F"></a-box>
-        <a-box position="-2 0.8 -1" width="1.3" height="0.05" depth="0.7" color="#DEB887"></a-box>
+        <!-- ═══════════ WINDOWS (Left Wall) ═══════════ -->
 
-        <a-box position="-2 0.4 1" width="1.2" height="0.8" depth="0.6" color="#CD853F"></a-box>
-        <a-box position="-2 0.8 1" width="1.3" height="0.05" depth="0.7" color="#DEB887"></a-box>
+        <!-- Window 1 -->
+        <a-box position="-5.9 3.2 -3" width="0.05" height="2" depth="1.8" color="#ADE0FF" opacity="0.5"></a-box>
+        <a-box position="-5.88 3.2 -3" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="-5.88 3.2 -3" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
+        <a-box position="-5.88 3.2 -2.1" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="-5.88 3.2 -3.9" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="-5.88 4.2 -3" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
+        <a-box position="-5.88 2.2 -3" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
 
-        <!-- Student Desks Row 1 (Right) -->
-        <a-box position="2 0.4 -1" width="1.2" height="0.8" depth="0.6" color="#CD853F"></a-box>
-        <a-box position="2 0.8 -1" width="1.3" height="0.05" depth="0.7" color="#DEB887"></a-box>
+        <!-- Window 2 -->
+        <a-box position="-5.9 3.2 1" width="0.05" height="2" depth="1.8" color="#ADE0FF" opacity="0.5"></a-box>
+        <a-box position="-5.88 3.2 1" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="-5.88 3.2 1" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
+        <a-box position="-5.88 3.2 0.1" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="-5.88 3.2 1.9" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="-5.88 4.2 1" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
+        <a-box position="-5.88 2.2 1" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
 
-        <a-box position="2 0.4 1" width="1.2" height="0.8" depth="0.6" color="#CD853F"></a-box>
-        <a-box position="2 0.8 1" width="1.3" height="0.05" depth="0.7" color="#DEB887"></a-box>
+        <!-- ═══════════ WINDOWS (Right Wall) ═══════════ -->
 
-        <!-- Chairs for students (simple boxes) -->
-        <a-box position="-2 0.25 -0.3" width="0.4" height="0.5" depth="0.4" color="#654321"></a-box>
-        <a-box position="-2 0.25 1.7" width="0.4" height="0.5" depth="0.4" color="#654321"></a-box>
-        <a-box position="2 0.25 -0.3" width="0.4" height="0.5" depth="0.4" color="#654321"></a-box>
-        <a-box position="2 0.25 1.7" width="0.4" height="0.5" depth="0.4" color="#654321"></a-box>
+        <!-- Window 3 -->
+        <a-box position="5.9 3.2 -3" width="0.05" height="2" depth="1.8" color="#ADE0FF" opacity="0.5"></a-box>
+        <a-box position="5.88 3.2 -3" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="5.88 3.2 -3" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
+        <a-box position="5.88 3.2 -2.1" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="5.88 3.2 -3.9" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="5.88 4.2 -3" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
+        <a-box position="5.88 2.2 -3" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
+
+        <!-- Window 4 -->
+        <a-box position="5.9 3.2 1" width="0.05" height="2" depth="1.8" color="#ADE0FF" opacity="0.5"></a-box>
+        <a-box position="5.88 3.2 1" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="5.88 3.2 1" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
+        <a-box position="5.88 3.2 0.1" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="5.88 3.2 1.9" width="0.02" height="2.1" depth="0.08" color="#5C3A1E"></a-box>
+        <a-box position="5.88 4.2 1" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
+        <a-box position="5.88 2.2 1" width="0.02" height="0.08" depth="1.9" color="#5C3A1E"></a-box>
+
+        <!-- ═══════════ OUTSIDE SCENERY (visible through windows) ═══════════ -->
+
+        <!-- Ground outside -->
+        <a-box position="0 -0.05 0" width="50" height="0.01" depth="50" color="#4CAF50"></a-box>
+
+        <!-- Trees outside left -->
+        <a-cylinder position="-9 1.5 -3" radius="0.2" height="3" color="#5C3A1E"></a-cylinder>
+        <a-sphere position="-9 3.5 -3" radius="1.2" color="#2E7D32"></a-sphere>
+        <a-cylinder position="-9 1.5 1" radius="0.2" height="3" color="#5C3A1E"></a-cylinder>
+        <a-sphere position="-9 3.5 1" radius="1" color="#388E3C"></a-sphere>
+        <a-cylinder position="-8 1.2 -1" radius="0.15" height="2.4" color="#5C3A1E"></a-cylinder>
+        <a-sphere position="-8 3 -1" radius="0.9" color="#43A047"></a-sphere>
+
+        <!-- Trees outside right -->
+        <a-cylinder position="9 1.5 -3" radius="0.2" height="3" color="#5C3A1E"></a-cylinder>
+        <a-sphere position="9 3.5 -3" radius="1.1" color="#2E7D32"></a-sphere>
+        <a-cylinder position="9 1.5 1" radius="0.2" height="3" color="#5C3A1E"></a-cylinder>
+        <a-sphere position="9 3.5 1" radius="1.3" color="#1B5E20"></a-sphere>
+
+        <!-- School building visible outside (behind back wall) -->
+        <a-box position="0 2.5 -12" width="8" height="5" depth="3" color="#E57373"></a-box>
+        <a-box position="0 5.5 -12" width="8.5" height="0.3" depth="3.5" color="#C62828"></a-box>
+        <!-- School windows -->
+        <a-box position="-2 3 -10.4" width="1" height="1.2" depth="0.1" color="#81D4FA"></a-box>
+        <a-box position="0 3 -10.4" width="1" height="1.2" depth="0.1" color="#81D4FA"></a-box>
+        <a-box position="2 3 -10.4" width="1" height="1.2" depth="0.1" color="#81D4FA"></a-box>
+        <!-- School sign -->
+        <a-box position="0 4.5 -10.4" width="3" height="0.6" depth="0.05" color="#FFFFFF"></a-box>
+        <a-text position="0 4.5 -10.35" value="STEM SCHOOL" align="center" color="#1565C0" width="4"></a-text>
+
+        <!-- Flower beds -->
+        <a-box position="-8 0.15 -5" width="2" height="0.3" depth="0.5" color="#5D4037"></a-box>
+        <a-sphere position="-8.4 0.5 -5" radius="0.2" color="#E91E63"></a-sphere>
+        <a-sphere position="-8 0.5 -5" radius="0.2" color="#FF9800"></a-sphere>
+        <a-sphere position="-7.6 0.5 -5" radius="0.2" color="#FFEB3B"></a-sphere>
+
+        <a-box position="8 0.15 -5" width="2" height="0.3" depth="0.5" color="#5D4037"></a-box>
+        <a-sphere position="7.6 0.5 -5" radius="0.2" color="#9C27B0"></a-sphere>
+        <a-sphere position="8 0.5 -5" radius="0.2" color="#F44336"></a-sphere>
+        <a-sphere position="8.4 0.5 -5" radius="0.2" color="#4CAF50"></a-sphere>
+
+        <!-- Clouds -->
+        <a-sphere position="-8 10 -15" radius="1.5" color="#FFFFFF" opacity="0.9"></a-sphere>
+        <a-sphere position="-6.5 10.3 -15" radius="1.2" color="#FFFFFF" opacity="0.9"></a-sphere>
+        <a-sphere position="5 11 -18" radius="2" color="#FFFFFF" opacity="0.85"></a-sphere>
+        <a-sphere position="7 11.2 -18" radius="1.5" color="#FFFFFF" opacity="0.85"></a-sphere>
+
+        <!-- ═══════════ WHITEBOARD ═══════════ -->
+
+        <!-- Board frame -->
+        <a-box position="0 3.2 -5.85" width="5" height="2.6" depth="0.08" color="#4E342E"></a-box>
+        <!-- Board surface -->
+        <a-box position="0 3.2 -5.8" width="4.7" height="2.3" depth="0.04" color="#E8F5E9"></a-box>
+
+        <!-- Equations on whiteboard -->
+        <a-text position="-1.8 4.05 -5.77" value="E = mc²" color="#1B5E20" width="4" font="monoid"></a-text>
+        <a-text position="-1.8 3.55 -5.77" value="F = ma" color="#0D47A1" width="3.5" font="monoid"></a-text>
+        <a-text position="-1.8 3.05 -5.77" value="a² + b² = c²" color="#B71C1C" width="3.5" font="monoid"></a-text>
+        <a-text position="-1.8 2.55 -5.77" value="V = IR" color="#4A148C" width="3" font="monoid"></a-text>
+        <a-text position="1.2 4.05 -5.77" value="H₂O → Water" color="#1B5E20" width="3" font="monoid"></a-text>
+        <a-text position="1.2 3.55 -5.77" value="π ≈ 3.14159" color="#E65100" width="3" font="monoid"></a-text>
+        <a-text position="1.2 3.05 -5.77" value="∑F = 0 (equilibrium)" color="#0D47A1" width="3" font="monoid"></a-text>
+
+        <!-- Marker tray -->
+        <a-box position="0 1.85 -5.7" width="2" height="0.08" depth="0.12" color="#5D4037"></a-box>
+        <!-- Markers -->
+        <a-cylinder position="-0.4 1.92 -5.7" radius="0.03" height="0.15" rotation="0 0 90"
+            color="#F44336"></a-cylinder>
+        <a-cylinder position="-0.1 1.92 -5.7" radius="0.03" height="0.15" rotation="0 0 90"
+            color="#2196F3"></a-cylinder>
+        <a-cylinder position="0.2 1.92 -5.7" radius="0.03" height="0.15" rotation="0 0 90" color="#4CAF50"></a-cylinder>
+
+        <!-- ═══════════ TEACHER'S DESK ═══════════ -->
+        <!-- Desk body -->
+        <a-box position="0 0.45 -4.5" width="2" height="0.9" depth="0.9" color="#5D4037"></a-box>
+        <!-- Desk top -->
+        <a-box position="0 0.92 -4.5" width="2.2" height="0.06" depth="1" color="#6D4C41"></a-box>
+        <!-- Books stack -->
+        <a-box position="-0.6 1.0 -4.5" width="0.25" height="0.05" depth="0.35" color="#E53935"></a-box>
+        <a-box position="-0.6 1.05 -4.5" width="0.25" height="0.05" depth="0.35" color="#1E88E5"></a-box>
+        <a-box position="-0.6 1.1 -4.5" width="0.25" height="0.05" depth="0.35" color="#43A047"></a-box>
+        <!-- Apple -->
+        <a-sphere position="0.5 1.05 -4.5" radius="0.1" color="#E53935"></a-sphere>
+        <a-cylinder position="0.5 1.18 -4.5" radius="0.015" height="0.08" color="#4E342E"></a-cylinder>
+        <!-- Laptop -->
+        <a-box position="0 0.97 -4.3" width="0.4" height="0.02" depth="0.3" color="#37474F"></a-box>
+        <a-box position="0 1.12 -4.45" width="0.38" height="0.22" depth="0.01" rotation="-15 0 0"
+            color="#455A64"></a-box>
 
         <!-- Teacher's chair -->
-        <a-box position="0 0.3 -3.2" width="0.5" height="0.6" depth="0.5" color="#8B4513"></a-box>
+        <a-box position="0 0.3 -3.7" width="0.5" height="0.6" depth="0.5" color="#3E2723"></a-box>
+        <a-box position="0 0.7 -3.95" width="0.5" height="0.6" depth="0.06" color="#3E2723"></a-box>
 
-        <!-- Window on left wall -->
-        <a-box position="-4.95 3 -2" width="0.05" height="1.5" depth="2" color="#ADD8E6"></a-box>
+        <!-- ═══════════ STUDENT DESKS (3 rows × 2 columns) ═══════════ -->
 
-        <!-- Books on teacher's desk -->
-        <a-box position="-0.3 0.85 -4" width="0.2" height="0.1" depth="0.3" color="#FF6347"></a-box>
-        <a-box position="-0.1 0.85 -4" width="0.2" height="0.1" depth="0.3" color="#4169E1"></a-box>
+        <!-- Row 1 Left -->
+        <a-box position="-2.5 0.4 -2" width="1.3" height="0.8" depth="0.6" color="#8D6E63"></a-box>
+        <a-box position="-2.5 0.82 -2" width="1.4" height="0.05" depth="0.7" color="#A1887F"></a-box>
+        <a-box position="-2.5 0.25 -1.3" width="0.4" height="0.5" depth="0.4" color="#4E342E"></a-box>
 
-        <!-- Clock on back wall -->
-        <a-cylinder position="3 4 -4.9" radius="0.3" height="0.1" rotation="0 0 0" color="#333333"></a-cylinder>
-        <a-cylinder position="3 4 -4.85" radius="0.25" height="0.05" rotation="0 0 0" color="#FFFFFF"></a-cylinder>
+        <!-- Row 1 Right -->
+        <a-box position="2.5 0.4 -2" width="1.3" height="0.8" depth="0.6" color="#8D6E63"></a-box>
+        <a-box position="2.5 0.82 -2" width="1.4" height="0.05" depth="0.7" color="#A1887F"></a-box>
+        <a-box position="2.5 0.25 -1.3" width="0.4" height="0.5" depth="0.4" color="#4E342E"></a-box>
 
-        <!-- TEACHER -->
-        <!-- Teacher body (standing) -->
-        <a-box position="-1.2 1.3 -3.8" width="0.4" height="0.8" depth="0.3" color="#2E5090"></a-box>
-        <!-- Teacher head -->
-        <a-sphere position="-1.2 1.9 -3.8" radius="0.15" color="#FDBCB4"></a-sphere>
-        <!-- Teacher arms -->
-        <a-cylinder position="-1.4 1.4 -3.8" radius="0.05" height="0.5" rotation="0 0 45" color="#FDBCB4"></a-cylinder>
-        <a-cylinder position="-1.0 1.4 -3.8" radius="0.05" height="0.5" rotation="0 0 -45" color="#FDBCB4"></a-cylinder>
-        <!-- Teacher legs -->
-        <a-cylinder position="-1.3 0.7 -3.8" radius="0.06" height="0.6" color="#1A3A6E"></a-cylinder>
-        <a-cylinder position="-1.1 0.7 -3.8" radius="0.06" height="0.6" color="#1A3A6E"></a-cylinder>
+        <!-- Row 2 Left -->
+        <a-box position="-2.5 0.4 0.5" width="1.3" height="0.8" depth="0.6" color="#8D6E63"></a-box>
+        <a-box position="-2.5 0.82 0.5" width="1.4" height="0.05" depth="0.7" color="#A1887F"></a-box>
+        <a-box position="-2.5 0.25 1.2" width="0.4" height="0.5" depth="0.4" color="#4E342E"></a-box>
 
-        <!-- STUDENT 1 (Left front desk - sitting) -->
-        <!-- Body -->
-        <a-box position="-2 1.1 -1" width="0.3" height="0.5" depth="0.25" color="#FF6B9D"></a-box>
-        <!-- Head -->
-        <a-sphere position="-2 1.5 -1" radius="0.12" color="#F4C2A1"></a-sphere>
-        <!-- Arms -->
-        <a-cylinder position="-2.15 1.15 -1" radius="0.04" height="0.35" rotation="0 0 20" color="#F4C2A1"></a-cylinder>
-        <a-cylinder position="-1.85 1.15 -1" radius="0.04" height="0.35" rotation="0 0 -20"
-            color="#F4C2A1"></a-cylinder>
-        <!-- Legs (sitting) -->
-        <a-cylinder position="-2.1 0.7 -0.9" radius="0.05" height="0.4" rotation="90 0 0" color="#4A4A4A"></a-cylinder>
-        <a-cylinder position="-1.9 0.7 -0.9" radius="0.05" height="0.4" rotation="90 0 0" color="#4A4A4A"></a-cylinder>
+        <!-- Row 2 Right -->
+        <a-box position="2.5 0.4 0.5" width="1.3" height="0.8" depth="0.6" color="#8D6E63"></a-box>
+        <a-box position="2.5 0.82 0.5" width="1.4" height="0.05" depth="0.7" color="#A1887F"></a-box>
+        <a-box position="2.5 0.25 1.2" width="0.4" height="0.5" depth="0.4" color="#4E342E"></a-box>
 
-        <!-- STUDENT 2 (Left back desk - sitting) -->
-        <!-- Body -->
-        <a-box position="-2 1.1 1" width="0.3" height="0.5" depth="0.25" color="#4ECDC4"></a-box>
-        <!-- Head -->
-        <a-sphere position="-2 1.5 1" radius="0.12" color="#D4A373"></a-sphere>
-        <!-- Arms -->
-        <a-cylinder position="-2.15 1.15 1" radius="0.04" height="0.35" rotation="0 0 20" color="#D4A373"></a-cylinder>
-        <a-cylinder position="-1.85 1.15 1" radius="0.04" height="0.35" rotation="0 0 -20" color="#D4A373"></a-cylinder>
-        <!-- Legs (sitting) -->
-        <a-cylinder position="-2.1 0.7 1.1" radius="0.05" height="0.4" rotation="90 0 0" color="#2C3E50"></a-cylinder>
-        <a-cylinder position="-1.9 0.7 1.1" radius="0.05" height="0.4" rotation="90 0 0" color="#2C3E50"></a-cylinder>
+        <!-- Row 3 Left -->
+        <a-box position="-2.5 0.4 3" width="1.3" height="0.8" depth="0.6" color="#8D6E63"></a-box>
+        <a-box position="-2.5 0.82 3" width="1.4" height="0.05" depth="0.7" color="#A1887F"></a-box>
+        <a-box position="-2.5 0.25 3.7" width="0.4" height="0.5" depth="0.4" color="#4E342E"></a-box>
 
-        <!-- STUDENT 3 (Right front desk - sitting) -->
-        <!-- Body -->
-        <a-box position="2 1.1 -1" width="0.3" height="0.5" depth="0.25" color="#FFD93D"></a-box>
-        <!-- Head -->
-        <a-sphere position="2 1.5 -1" radius="0.12" color="#F4C2A1"></a-sphere>
-        <!-- Arms -->
-        <a-cylinder position="1.85 1.15 -1" radius="0.04" height="0.35" rotation="0 0 20" color="#F4C2A1"></a-cylinder>
-        <a-cylinder position="2.15 1.15 -1" radius="0.04" height="0.35" rotation="0 0 -20" color="#F4C2A1"></a-cylinder>
-        <!-- Legs (sitting) -->
-        <a-cylinder position="1.9 0.7 -0.9" radius="0.05" height="0.4" rotation="90 0 0" color="#8B4513"></a-cylinder>
-        <a-cylinder position="2.1 0.7 -0.9" radius="0.05" height="0.4" rotation="90 0 0" color="#8B4513"></a-cylinder>
+        <!-- Row 3 Right -->
+        <a-box position="2.5 0.4 3" width="1.3" height="0.8" depth="0.6" color="#8D6E63"></a-box>
+        <a-box position="2.5 0.82 3" width="1.4" height="0.05" depth="0.7" color="#A1887F"></a-box>
+        <a-box position="2.5 0.25 3.7" width="0.4" height="0.5" depth="0.4" color="#4E342E"></a-box>
 
-        <!-- STUDENT 4 (Right back desk - sitting) -->
-        <!-- Body -->
-        <a-box position="2 1.1 1" width="0.3" height="0.5" depth="0.25" color="#95E1D3"></a-box>
-        <!-- Head -->
-        <a-sphere position="2 1.5 1" radius="0.12" color="#E8B89A"></a-sphere>
-        <!-- Arms -->
-        <a-cylinder position="1.85 1.15 1" radius="0.04" height="0.35" rotation="0 0 20" color="#E8B89A"></a-cylinder>
-        <a-cylinder position="2.15 1.15 1" radius="0.04" height="0.35" rotation="0 0 -20" color="#E8B89A"></a-cylinder>
-        <!-- Legs (sitting) -->
-        <a-cylinder position="1.9 0.7 1.1" radius="0.05" height="0.4" rotation="90 0 0" color="#34495E"></a-cylinder>
-        <a-cylinder position="2.1 0.7 1.1" radius="0.05" height="0.4" rotation="90 0 0" color="#34495E"></a-cylinder>
+        <!-- ═══════════ TEACHER FIGURE ═══════════ -->
+        <a-entity id="teacher" position="0 0 -4" teacher-animate>
+            <!-- Body -->
+            <a-box position="0 1.0 0" width="0.45" height="0.7" depth="0.25" color="#1565C0"></a-box>
+            <!-- Head -->
+            <a-sphere position="0 1.6 0" radius="0.2" color="#FFCCBC"></a-sphere>
+            <!-- Hair -->
+            <a-sphere position="0 1.72 -0.02" radius="0.18" color="#3E2723"></a-sphere>
+            <!-- Legs -->
+            <a-box position="-0.1 0.35 0" width="0.14" height="0.6" depth="0.14" color="#37474F"></a-box>
+            <a-box position="0.1 0.35 0" width="0.14" height="0.6" depth="0.14" color="#37474F"></a-box>
+            <!-- Left arm -->
+            <a-box position="-0.3 1.0 0" width="0.1" height="0.5" depth="0.1" color="#1565C0"></a-box>
+            <!-- Right arm (animated) -->
+            <a-entity class="teacher-arm" position="0.3 1.25 0">
+                <a-box position="0 -0.15 0" width="0.1" height="0.5" depth="0.1" color="#1565C0"></a-box>
+            </a-entity>
+            <!-- Glasses -->
+            <a-ring position="-0.08 1.62 0.18" radius-inner="0.03" radius-outer="0.05" color="#333"
+                rotation="0 0 0"></a-ring>
+            <a-ring position="0.08 1.62 0.18" radius-inner="0.03" radius-outer="0.05" color="#333"
+                rotation="0 0 0"></a-ring>
 
-        <!-- Lighting -->
-        <a-light type="ambient" color="#BBB"></a-light>
-        <a-light type="directional" position="2 4 1" intensity="0.5"></a-light>
-
-        <!-- Camera with WASD controls -->
-        <a-entity position="0 1.6 4">
-            <a-camera look-controls wasd-controls></a-camera>
+            <!-- Teacher speech bubble -->
+            <a-entity id="teacher-bubble" position="0.5 2.1 0" speech-bubble>
+                <a-box class="bubble-bg" position="0 0 0" width="1.4" height="0.4" depth="0.02" color="#FFFFFF"
+                    opacity="0.9"></a-box>
+                <a-entity position="0 0 0.02"
+                    text="value: ; color: #1B5E20; align: center; width: 2.5; wrapCount: 20"></a-entity>
+            </a-entity>
         </a-entity>
-        <!-- ======================================= -->
-        <!-- CAMERA + CONTROLLER RIG                 -->
-        <!-- Paste INSIDE <a-scene> at the TOP       -->
-        <!-- ======================================= -->
 
-        <!-- "rig" = Your VR body (head + both hands) -->
-        <!-- movement-controls: Enables WASD keyboard + VR thumbstick movement -->
-        <!-- position: Starting position at the door -->
-        <!-- Think of it like your character in a video game -->
-        <a-entity id="rig" movement-controls="fly: false; speed: 0.15" position="0 0 4">
+        <!-- ═══════════ STUDENT FIGURES ═══════════ -->
 
-            <!-- VR Camera = Your Eyes/Head -->
-            <!-- position="0 1.6 0" = 1.6 meters tall (average human eye height) -->
-            <!-- look-controls = Move your head (VR) or drag mouse (desktop) to look around -->
-            <!-- wasd-controls = Use WASD keys on Windows keyboard to move -->
-            <!-- Think: This is your first-person POV like in Call of Duty -->
-            <a-entity camera position="0 1.6 0" look-controls wasd-controls="acceleration: 20">
+        <!-- Student 1 – seated Row 1 Left -->
+        <a-entity class="student-figure" position="-2.5 0 -1.3" hand-raise>
+            <a-box position="0 0.75 0" width="0.35" height="0.5" depth="0.2" color="#E53935"></a-box>
+            <a-sphere position="0 1.2 0" radius="0.16" color="#FFCCBC"></a-sphere>
+            <a-sphere position="0 1.3 -0.02" radius="0.14" color="#212121"></a-sphere>
+            <a-box position="-0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#1565C0"></a-box>
+            <a-box position="0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#1565C0"></a-box>
+            <a-box position="-0.24 0.75 0" width="0.08" height="0.4" depth="0.08" color="#E53935"></a-box>
+            <a-entity class="student-arm" position="0.24 0.95 0">
+                <a-box position="0 -0.12 0" width="0.08" height="0.4" depth="0.08" color="#E53935"></a-box>
             </a-entity>
-
-            <!-- LEFT CONTROLLER = Your Left Hand in VR (Meta Quest) -->
-            <a-entity id="leftController" meta-touch-controls="hand: left" laser-controls="hand: left"
-                raycaster="objects: .clickable; far: 20" line="color: cyan">
+            <a-entity class="student-bubble" position="0.4 1.7 0" speech-bubble>
+                <a-box class="bubble-bg" position="0 0 0" width="1.2" height="0.35" depth="0.02" color="#FFF9C4"
+                    opacity="0.9"></a-box>
+                <a-entity position="0 0 0.02"
+                    text="value: ; color: #333; align: center; width: 2; wrapCount: 18"></a-entity>
             </a-entity>
+        </a-entity>
 
-            <!-- RIGHT CONTROLLER = Your Right Hand in VR (Meta Quest) -->
-            <a-entity id="rightController" meta-touch-controls="hand: right" laser-controls="hand: right"
-                raycaster="objects: .clickable; far: 20" line="color: magenta">
+        <!-- Student 2 – seated Row 1 Right -->
+        <a-entity class="student-figure" position="2.5 0 -1.3" hand-raise>
+            <a-box position="0 0.75 0" width="0.35" height="0.5" depth="0.2" color="#7B1FA2"></a-box>
+            <a-sphere position="0 1.2 0" radius="0.16" color="#FFCCBC"></a-sphere>
+            <a-sphere position="0 1.3 -0.02" radius="0.14" color="#4E342E"></a-sphere>
+            <a-box position="-0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#455A64"></a-box>
+            <a-box position="0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#455A64"></a-box>
+            <a-box position="-0.24 0.75 0" width="0.08" height="0.4" depth="0.08" color="#7B1FA2"></a-box>
+            <a-entity class="student-arm" position="0.24 0.95 0">
+                <a-box position="0 -0.12 0" width="0.08" height="0.4" depth="0.08" color="#7B1FA2"></a-box>
             </a-entity>
+            <a-entity class="student-bubble" position="0.4 1.7 0" speech-bubble>
+                <a-box class="bubble-bg" position="0 0 0" width="1.2" height="0.35" depth="0.02" color="#FFF9C4"
+                    opacity="0.9"></a-box>
+                <a-entity position="0 0 0.02"
+                    text="value: ; color: #333; align: center; width: 2; wrapCount: 18"></a-entity>
+            </a-entity>
+        </a-entity>
 
+        <!-- Student 3 – seated Row 2 Left -->
+        <a-entity class="student-figure" position="-2.5 0 1.2" hand-raise>
+            <a-box position="0 0.75 0" width="0.35" height="0.5" depth="0.2" color="#00897B"></a-box>
+            <a-sphere position="0 1.2 0" radius="0.16" color="#FFCCBC"></a-sphere>
+            <a-sphere position="0 1.3 -0.02" radius="0.14" color="#FF8F00"></a-sphere>
+            <a-box position="-0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#3E2723"></a-box>
+            <a-box position="0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#3E2723"></a-box>
+            <a-box position="-0.24 0.75 0" width="0.08" height="0.4" depth="0.08" color="#00897B"></a-box>
+            <a-entity class="student-arm" position="0.24 0.95 0">
+                <a-box position="0 -0.12 0" width="0.08" height="0.4" depth="0.08" color="#00897B"></a-box>
+            </a-entity>
+            <a-entity class="student-bubble" position="0.4 1.7 0" speech-bubble>
+                <a-box class="bubble-bg" position="0 0 0" width="1.2" height="0.35" depth="0.02" color="#FFF9C4"
+                    opacity="0.9"></a-box>
+                <a-entity position="0 0 0.02"
+                    text="value: ; color: #333; align: center; width: 2; wrapCount: 18"></a-entity>
+            </a-entity>
+        </a-entity>
+
+        <!-- Student 4 – seated Row 2 Right -->
+        <a-entity class="student-figure" position="2.5 0 1.2" hand-raise>
+            <a-box position="0 0.75 0" width="0.35" height="0.5" depth="0.2" color="#F57C00"></a-box>
+            <a-sphere position="0 1.2 0" radius="0.16" color="#FFCCBC"></a-sphere>
+            <a-sphere position="0 1.3 -0.02" radius="0.14" color="#1B5E20"></a-sphere>
+            <a-box position="-0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#37474F"></a-box>
+            <a-box position="0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#37474F"></a-box>
+            <a-box position="-0.24 0.75 0" width="0.08" height="0.4" depth="0.08" color="#F57C00"></a-box>
+            <a-entity class="student-arm" position="0.24 0.95 0">
+                <a-box position="0 -0.12 0" width="0.08" height="0.4" depth="0.08" color="#F57C00"></a-box>
+            </a-entity>
+            <a-entity class="student-bubble" position="0.4 1.7 0" speech-bubble>
+                <a-box class="bubble-bg" position="0 0 0" width="1.2" height="0.35" depth="0.02" color="#FFF9C4"
+                    opacity="0.9"></a-box>
+                <a-entity position="0 0 0.02"
+                    text="value: ; color: #333; align: center; width: 2; wrapCount: 18"></a-entity>
+            </a-entity>
+        </a-entity>
+
+        <!-- Student 5 – seated Row 3 Left -->
+        <a-entity class="student-figure" position="-2.5 0 3.7" hand-raise>
+            <a-box position="0 0.75 0" width="0.35" height="0.5" depth="0.2" color="#C62828"></a-box>
+            <a-sphere position="0 1.2 0" radius="0.16" color="#FFCCBC"></a-sphere>
+            <a-sphere position="0 1.3 -0.02" radius="0.14" color="#5D4037"></a-sphere>
+            <a-box position="-0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#1A237E"></a-box>
+            <a-box position="0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#1A237E"></a-box>
+            <a-box position="-0.24 0.75 0" width="0.08" height="0.4" depth="0.08" color="#C62828"></a-box>
+            <a-entity class="student-arm" position="0.24 0.95 0">
+                <a-box position="0 -0.12 0" width="0.08" height="0.4" depth="0.08" color="#C62828"></a-box>
+            </a-entity>
+            <a-entity class="student-bubble" position="0.4 1.7 0" speech-bubble>
+                <a-box class="bubble-bg" position="0 0 0" width="1.2" height="0.35" depth="0.02" color="#FFF9C4"
+                    opacity="0.9"></a-box>
+                <a-entity position="0 0 0.02"
+                    text="value: ; color: #333; align: center; width: 2; wrapCount: 18"></a-entity>
+            </a-entity>
+        </a-entity>
+
+        <!-- Student 6 – seated Row 3 Right -->
+        <a-entity class="student-figure" position="2.5 0 3.7" hand-raise>
+            <a-box position="0 0.75 0" width="0.35" height="0.5" depth="0.2" color="#1565C0"></a-box>
+            <a-sphere position="0 1.2 0" radius="0.16" color="#FFCCBC"></a-sphere>
+            <a-sphere position="0 1.3 -0.02" radius="0.14" color="#BF360C"></a-sphere>
+            <a-box position="-0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#4E342E"></a-box>
+            <a-box position="0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#4E342E"></a-box>
+            <a-box position="-0.24 0.75 0" width="0.08" height="0.4" depth="0.08" color="#1565C0"></a-box>
+            <a-entity class="student-arm" position="0.24 0.95 0">
+                <a-box position="0 -0.12 0" width="0.08" height="0.4" depth="0.08" color="#1565C0"></a-box>
+            </a-entity>
+            <a-entity class="student-bubble" position="0.4 1.7 0" speech-bubble>
+                <a-box class="bubble-bg" position="0 0 0" width="1.2" height="0.35" depth="0.02" color="#FFF9C4"
+                    opacity="0.9"></a-box>
+                <a-entity position="0 0 0.02"
+                    text="value: ; color: #333; align: center; width: 2; wrapCount: 18"></a-entity>
+            </a-entity>
+        </a-entity>
+
+        <!-- ═══════════ STANDING / WALKING STUDENTS ═══════════ -->
+
+        <!-- Walking Student A (wanderer near back) -->
+        <a-entity class="student-figure" position="-0.5 0 -2.5" hand-raise random-walk="speed:0.4;range:2;pause:2500">
+            <a-box position="0 0.75 0" width="0.35" height="0.5" depth="0.2" color="#FF6F00"></a-box>
+            <a-sphere position="0 1.2 0" radius="0.16" color="#FFCCBC"></a-sphere>
+            <a-sphere position="0 1.3 -0.02" radius="0.14" color="#212121"></a-sphere>
+            <a-box position="-0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#1B5E20"></a-box>
+            <a-box position="0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#1B5E20"></a-box>
+            <a-box position="-0.24 0.75 0" width="0.08" height="0.4" depth="0.08" color="#FF6F00"></a-box>
+            <a-entity class="student-arm" position="0.24 0.95 0">
+                <a-box position="0 -0.12 0" width="0.08" height="0.4" depth="0.08" color="#FF6F00"></a-box>
+            </a-entity>
+            <!-- Leg walk animation -->
+            <a-entity>
+                <a-box position="-0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#1B5E20"
+                    animation="property:rotation;from:20 0 0;to:-20 0 0;dur:600;dir:alternate;loop:true"></a-box>
+            </a-entity>
+            <a-entity class="student-bubble" position="0.4 1.7 0" speech-bubble>
+                <a-box class="bubble-bg" position="0 0 0" width="1.2" height="0.35" depth="0.02" color="#FFF9C4"
+                    opacity="0.9"></a-box>
+                <a-entity position="0 0 0.02"
+                    text="value: ; color: #333; align: center; width: 2; wrapCount: 18"></a-entity>
+            </a-entity>
+        </a-entity>
+
+        <!-- Walking Student B (wanderer near middle) -->
+        <a-entity class="student-figure" position="1 0 1" hand-raise random-walk="speed:0.35;range:2.5;pause:3000">
+            <a-box position="0 0.75 0" width="0.35" height="0.5" depth="0.2" color="#AD1457"></a-box>
+            <a-sphere position="0 1.2 0" radius="0.16" color="#FFCCBC"></a-sphere>
+            <a-sphere position="0 1.3 -0.02" radius="0.14" color="#4E342E"></a-sphere>
+            <a-box position="-0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#283593"></a-box>
+            <a-box position="0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#283593"></a-box>
+            <a-box position="-0.24 0.75 0" width="0.08" height="0.4" depth="0.08" color="#AD1457"></a-box>
+            <a-entity class="student-arm" position="0.24 0.95 0">
+                <a-box position="0 -0.12 0" width="0.08" height="0.4" depth="0.08" color="#AD1457"></a-box>
+            </a-entity>
+            <a-entity>
+                <a-box position="0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#283593"
+                    animation="property:rotation;from:-20 0 0;to:20 0 0;dur:600;dir:alternate;loop:true"></a-box>
+            </a-entity>
+            <a-entity class="student-bubble" position="0.4 1.7 0" speech-bubble>
+                <a-box class="bubble-bg" position="0 0 0" width="1.2" height="0.35" depth="0.02" color="#FFF9C4"
+                    opacity="0.9"></a-box>
+                <a-entity position="0 0 0.02"
+                    text="value: ; color: #333; align: center; width: 2; wrapCount: 18"></a-entity>
+            </a-entity>
+        </a-entity>
+
+        <!-- Standing Student C (near door, idle) -->
+        <a-entity class="student-figure" position="1.5 0 5" rotation="0 180 0" hand-raise>
+            <a-box position="0 0.75 0" width="0.35" height="0.5" depth="0.2" color="#0097A7"></a-box>
+            <a-sphere position="0 1.2 0" radius="0.16" color="#FFCCBC"></a-sphere>
+            <a-sphere position="0 1.3 -0.02" radius="0.14" color="#FF6F00"></a-sphere>
+            <a-box position="-0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#37474F"></a-box>
+            <a-box position="0.08 0.35 0" width="0.12" height="0.5" depth="0.12" color="#37474F"></a-box>
+            <a-box position="-0.24 0.75 0" width="0.08" height="0.4" depth="0.08" color="#0097A7"></a-box>
+            <a-entity class="student-arm" position="0.24 0.95 0">
+                <a-box position="0 -0.12 0" width="0.08" height="0.4" depth="0.08" color="#0097A7"></a-box>
+            </a-entity>
+            <a-entity class="student-bubble" position="0.4 1.7 0" speech-bubble>
+                <a-box class="bubble-bg" position="0 0 0" width="1.2" height="0.35" depth="0.02" color="#FFF9C4"
+                    opacity="0.9"></a-box>
+                <a-entity position="0 0 0.02"
+                    text="value: ; color: #333; align: center; width: 2; wrapCount: 18"></a-entity>
+            </a-entity>
+        </a-entity>
+
+        <!-- ═══════════ CLOCK (animated) ═══════════ -->
+        <a-cylinder position="4 4.3 -5.88" radius="0.35" height="0.08" color="#3E2723"></a-cylinder>
+        <a-cylinder position="4 4.3 -5.83" radius="0.3" height="0.04" color="#FAFAFA"></a-cylinder>
+        <!-- Hour hand -->
+        <a-box position="4 4.37 -5.8" width="0.03" height="0.18" depth="0.01" color="#333"
+            animation="property:rotation;from:0 0 0;to:0 0 -360;dur:43200000;loop:true;easing:linear"></a-box>
+        <!-- Minute hand -->
+        <a-box position="4 4.4 -5.8" width="0.02" height="0.25" depth="0.01" color="#E53935"
+            animation="property:rotation;from:0 0 0;to:0 0 -360;dur:3600000;loop:true;easing:linear"></a-box>
+
+        <!-- ═══════════ CLASSROOM EXTRAS ═══════════ -->
+
+        <!-- Bookshelf on right wall -->
+        <a-box position="5.5 1 -1" width="0.8" height="2" depth="0.4" color="#5D4037"></a-box>
+        <a-box position="5.5 0.5 -1" width="0.75" height="0.04" depth="0.35" color="#4E342E"></a-box>
+        <a-box position="5.5 1.0 -1" width="0.75" height="0.04" depth="0.35" color="#4E342E"></a-box>
+        <a-box position="5.5 1.5 -1" width="0.75" height="0.04" depth="0.35" color="#4E342E"></a-box>
+        <!-- Books on shelves -->
+        <a-box position="5.5 0.3 -1" width="0.15" height="0.25" depth="0.2" color="#E53935"></a-box>
+        <a-box position="5.35 0.3 -1" width="0.15" height="0.25" depth="0.2" color="#1E88E5"></a-box>
+        <a-box position="5.65 0.3 -1" width="0.15" height="0.2" depth="0.2" color="#43A047"></a-box>
+        <a-box position="5.5 0.75 -1" width="0.15" height="0.22" depth="0.2" color="#FF8F00"></a-box>
+        <a-box position="5.35 0.75 -1" width="0.15" height="0.22" depth="0.2" color="#7B1FA2"></a-box>
+        <a-box position="5.5 1.25 -1" width="0.15" height="0.2" depth="0.2" color="#00897B"></a-box>
+        <a-box position="5.35 1.25 -1" width="0.15" height="0.2" depth="0.2" color="#F44336"></a-box>
+
+        <!-- Globe on bookshelf -->
+        <a-sphere position="5.65 1.3 -1" radius="0.12" color="#1565C0"></a-sphere>
+        <a-cylinder position="5.65 1.12 -1" radius="0.04" height="0.1" color="#5D4037"></a-cylinder>
+
+        <!-- ═══════════ CHART PAPERS ═══════════ -->
+
+        <!-- ── BACK WALL CHARTS (beside whiteboard) ── -->
+
+        <!-- Chart 1: Solar System (back wall, left of whiteboard) -->
+        <a-box position="-4.2 3.2 -5.88" width="0.04" height="1.8" depth="1.5" color="#1A237E"></a-box>
+        <!-- Border -->
+        <a-box position="-4.2 3.2 -5.85" width="0.02" height="1.9" depth="0.06" color="#FFD600"></a-box>
+        <a-box position="-4.2 4.1 -5.85" width="0.02" height="0.06" depth="1.5" color="#FFD600"></a-box>
+        <a-box position="-4.2 2.3 -5.85" width="0.02" height="0.06" depth="1.5" color="#FFD600"></a-box>
+        <!-- Title -->
+        <a-text position="-4.18 3.95 -5.88" value="SOLAR SYSTEM" color="#FFD600" width="2.2" align="center"></a-text>
+        <!-- Sun -->
+        <a-sphere position="-4.17 3.55 -6.4" radius="0.12" color="#FFC107"></a-sphere>
+        <!-- Planets -->
+        <a-sphere position="-4.17 3.55 -6.15" radius="0.04" color="#9E9E9E"></a-sphere>
+        <a-sphere position="-4.17 3.55 -5.95" radius="0.06" color="#FF8F00"></a-sphere>
+        <a-sphere position="-4.17 3.55 -5.75" radius="0.06" color="#2196F3"></a-sphere>
+        <a-sphere position="-4.17 3.55 -5.55" radius="0.05" color="#E53935"></a-sphere>
+        <a-sphere position="-4.17 3.55 -5.35" radius="0.09" color="#FF9800"></a-sphere>
+        <!-- Labels -->
+        <a-text position="-4.17 3.2 -6.4" value="Sun" color="#FFF" width="1.2" align="center"></a-text>
+        <a-text position="-4.17 3.2 -5.75" value="Earth" color="#64B5F6" width="1.2" align="center"></a-text>
+        <a-text position="-4.17 3.2 -5.55" value="Mars" color="#EF9A9A" width="1.2" align="center"></a-text>
+        <a-text position="-4.17 3.2 -5.35" value="Jupiter" color="#FFCC80" width="1.2" align="center"></a-text>
+        <a-text position="-4.17 2.85 -5.88" value="★ 8 Planets ★" color="#CE93D8" width="1.8" align="center"></a-text>
+        <a-text position="-4.17 2.55 -5.88" value="Mercury Venus Earth Mars" color="#B0BEC5" width="1.6"
+            align="center"></a-text>
+        <a-text position="-4.17 2.4 -5.88" value="Jupiter Saturn Uranus Neptune" color="#B0BEC5" width="1.6"
+            align="center"></a-text>
+
+        <!-- Chart 2: Periodic Table Elements (back wall, right of whiteboard) -->
+        <a-box position="4.2 3.2 -5.88" width="0.04" height="1.8" depth="1.5" color="#E8F5E9"></a-box>
+        <!-- Border -->
+        <a-box position="4.2 3.2 -5.85" width="0.02" height="1.9" depth="0.06" color="#2E7D32"></a-box>
+        <a-box position="4.2 4.1 -5.85" width="0.02" height="0.06" depth="1.5" color="#2E7D32"></a-box>
+        <a-box position="4.2 2.3 -5.85" width="0.02" height="0.06" depth="1.5" color="#2E7D32"></a-box>
+        <!-- Title -->
+        <a-text position="4.22 3.95 -5.88" value="ELEMENTS" color="#1B5E20" width="2.5" align="center"></a-text>
+        <!-- Element boxes -->
+        <a-box position="4.22 3.6 -6.3" width="0.02" height="0.3" depth="0.3" color="#E53935"></a-box>
+        <a-text position="4.24 3.65 -6.3" value="H" color="#FFF" width="2" align="center"></a-text>
+        <a-text position="4.24 3.5 -6.3" value="1" color="#FFCDD2" width="1" align="center"></a-text>
+
+        <a-box position="4.22 3.6 -5.95" width="0.02" height="0.3" depth="0.3" color="#1565C0"></a-box>
+        <a-text position="4.24 3.65 -5.95" value="O" color="#FFF" width="2" align="center"></a-text>
+        <a-text position="4.24 3.5 -5.95" value="8" color="#BBDEFB" width="1" align="center"></a-text>
+
+        <a-box position="4.22 3.6 -5.6" width="0.02" height="0.3" depth="0.3" color="#2E7D32"></a-box>
+        <a-text position="4.24 3.65 -5.6" value="C" color="#FFF" width="2" align="center"></a-text>
+        <a-text position="4.24 3.5 -5.6" value="6" color="#C8E6C9" width="1" align="center"></a-text>
+
+        <a-box position="4.22 3.15 -6.3" width="0.02" height="0.3" depth="0.3" color="#7B1FA2"></a-box>
+        <a-text position="4.24 3.2 -6.3" value="Na" color="#FFF" width="2" align="center"></a-text>
+        <a-text position="4.24 3.05 -6.3" value="11" color="#E1BEE7" width="1" align="center"></a-text>
+
+        <a-box position="4.22 3.15 -5.95" width="0.02" height="0.3" depth="0.3" color="#FF6F00"></a-box>
+        <a-text position="4.24 3.2 -5.95" value="Fe" color="#FFF" width="2" align="center"></a-text>
+        <a-text position="4.24 3.05 -5.95" value="26" color="#FFE0B2" width="1" align="center"></a-text>
+
+        <a-box position="4.22 3.15 -5.6" width="0.02" height="0.3" depth="0.3" color="#00838F"></a-box>
+        <a-text position="4.24 3.2 -5.6" value="Au" color="#FFD600" width="2" align="center"></a-text>
+        <a-text position="4.24 3.05 -5.6" value="79" color="#B2EBF2" width="1" align="center"></a-text>
+
+        <a-text position="4.22 2.6 -5.88" value="Periodic Table" color="#1B5E20" width="1.8" align="center"></a-text>
+        <a-text position="4.22 2.4 -5.88" value="118 Elements!" color="#4CAF50" width="1.6" align="center"></a-text>
+
+        <!-- ── LEFT WALL CHARTS (between windows) ── -->
+
+        <!-- Chart 3: Math Rules (left wall, between windows) -->
+        <a-box position="-5.88 3.2 -1" width="0.04" height="1.6" depth="1.3" color="#FFF3E0"></a-box>
+        <a-box position="-5.86 3.2 -1" width="0.02" height="1.7" depth="0.06" color="#E65100"></a-box>
+        <a-box position="-5.86 4.0 -1" width="0.02" height="0.06" depth="1.3" color="#E65100"></a-box>
+        <a-box position="-5.86 2.4 -1" width="0.02" height="0.06" depth="1.3" color="#E65100"></a-box>
+        <a-text position="-5.84 3.85 -1" value="MATH RULES" rotation="0 90 0" color="#BF360C" width="2.5"
+            align="center"></a-text>
+        <a-text position="-5.84 3.55 -1" value="+ Addition" rotation="0 90 0" color="#E65100" width="1.8"
+            align="center"></a-text>
+        <a-text position="-5.84 3.3 -1" value="- Subtraction" rotation="0 90 0" color="#2E7D32" width="1.8"
+            align="center"></a-text>
+        <a-text position="-5.84 3.05 -1" value="× Multiplication" rotation="0 90 0" color="#1565C0" width="1.8"
+            align="center"></a-text>
+        <a-text position="-5.84 2.8 -1" value="÷ Division" rotation="0 90 0" color="#7B1FA2" width="1.8"
+            align="center"></a-text>
+        <a-text position="-5.84 2.5 -1" value="BODMAS Order!" rotation="0 90 0" color="#C62828" width="2"
+            align="center"></a-text>
+
+        <!-- Chart 4: Science poster (left wall, above window area) -->
+        <a-box position="-5.88 4.6 -3" width="0.04" height="0.7" depth="1.8" color="#E1F5FE"></a-box>
+        <a-box position="-5.86 4.6 -3" width="0.02" height="0.8" depth="0.06" color="#0277BD"></a-box>
+        <a-box position="-5.86 5.0 -3" width="0.02" height="0.06" depth="1.8" color="#0277BD"></a-box>
+        <a-box position="-5.86 4.2 -3" width="0.02" height="0.06" depth="1.8" color="#0277BD"></a-box>
+        <a-text position="-5.84 4.8 -3" value="STATES OF MATTER" rotation="0 90 0" color="#01579B" width="2.5"
+            align="center"></a-text>
+        <a-text position="-5.84 4.5 -3" value="Solid → Liquid → Gas" rotation="0 90 0" color="#0277BD" width="2.2"
+            align="center"></a-text>
+        <a-text position="-5.84 4.3 -3" value="Ice → Water → Steam" rotation="0 90 0" color="#0288D1" width="2"
+            align="center"></a-text>
+
+        <!-- Chart 5: Motivational (left wall, near front) -->
+        <a-box position="-5.88 3 3" width="0.04" height="1.4" depth="1.2" color="#FFF9C4"></a-box>
+        <a-box position="-5.86 3 3" width="0.02" height="1.5" depth="0.06" color="#F9A825"></a-box>
+        <a-box position="-5.86 3.7 3" width="0.02" height="0.06" depth="1.2" color="#F9A825"></a-box>
+        <a-box position="-5.86 2.3 3" width="0.02" height="0.06" depth="1.2" color="#F9A825"></a-box>
+        <a-text position="-5.84 3.5 3" value="SCIENCE" rotation="0 90 0" color="#2E7D32" width="2.5"
+            align="center"></a-text>
+        <a-text position="-5.84 3.2 3" value="IS FUN!" rotation="0 90 0" color="#F57C00" width="2.5"
+            align="center"></a-text>
+        <a-text position="-5.84 2.85 3" value="Ask Questions" rotation="0 90 0" color="#5D4037" width="1.8"
+            align="center"></a-text>
+        <a-text position="-5.84 2.6 3" value="Stay Curious ★" rotation="0 90 0" color="#7B1FA2" width="1.8"
+            align="center"></a-text>
+        <!-- Decorative stars -->
+        <a-text position="-5.84 2.4 2.7" value="★" rotation="0 90 0" color="#FFD600" width="2" align="center"></a-text>
+        <a-text position="-5.84 2.4 3.3" value="★" rotation="0 90 0" color="#FF6F00" width="2" align="center"></a-text>
+
+        <!-- ── RIGHT WALL CHARTS ── -->
+
+        <!-- Chart 6: Human Body (right wall, between windows) -->
+        <a-box position="5.88 3.2 -1" width="0.04" height="1.6" depth="1.3" color="#FCE4EC"></a-box>
+        <a-box position="5.86 3.2 -1" width="0.02" height="1.7" depth="0.06" color="#C62828"></a-box>
+        <a-box position="5.86 4.0 -1" width="0.02" height="0.06" depth="1.3" color="#C62828"></a-box>
+        <a-box position="5.86 2.4 -1" width="0.02" height="0.06" depth="1.3" color="#C62828"></a-box>
+        <a-text position="5.84 3.85 -1" value="HUMAN BODY" rotation="0 -90 0" color="#B71C1C" width="2.5"
+            align="center"></a-text>
+        <!-- Simple stick figure -->
+        <a-sphere position="5.84 3.5 -1" radius="0.1" rotation="0 -90 0" color="#FFCCBC"></a-sphere>
+        <a-box position="5.84 3.2 -1" width="0.02" height="0.35" depth="0.04" color="#5D4037"></a-box>
+        <a-box position="5.84 3.0 -0.9" width="0.02" height="0.25" depth="0.04" rotation="0 0 20"
+            color="#5D4037"></a-box>
+        <a-box position="5.84 3.0 -1.1" width="0.02" height="0.25" depth="0.04" rotation="0 0 -20"
+            color="#5D4037"></a-box>
+        <a-text position="5.84 2.75 -1" value="❤ Heart pumps blood" rotation="0 -90 0" color="#C62828" width="1.6"
+            align="center"></a-text>
+        <a-text position="5.84 2.55 -1" value="🧠 Brain = Control" rotation="0 -90 0" color="#4A148C" width="1.6"
+            align="center"></a-text>
+        <a-text position="5.84 2.4 -1" value="206 Bones!" rotation="0 -90 0" color="#00695C" width="1.6"
+            align="center"></a-text>
+
+        <!-- Chart 7: Shapes (right wall, near front) -->
+        <a-box position="5.88 3 2" width="0.04" height="1.4" depth="1.2" color="#E8EAF6"></a-box>
+        <a-box position="5.86 3 2" width="0.02" height="1.5" depth="0.06" color="#283593"></a-box>
+        <a-box position="5.86 3.7 2" width="0.02" height="0.06" depth="1.2" color="#283593"></a-box>
+        <a-box position="5.86 2.3 2" width="0.02" height="0.06" depth="1.2" color="#283593"></a-box>
+        <a-text position="5.84 3.5 2" value="SHAPES" rotation="0 -90 0" color="#1A237E" width="2.8"
+            align="center"></a-text>
+        <!-- Shape drawings -->
+        <a-box position="5.83 3.1 1.65" width="0.01" height="0.25" depth="0.25" color="#E53935"></a-box>
+        <a-sphere position="5.83 3.1 2" radius="0.13" color="#1565C0"></a-sphere>
+        <a-cylinder position="5.83 3.1 2.35" radius="0.13" height="0.02" rotation="0 0 90" color="#2E7D32"></a-cylinder>
+        <a-text position="5.84 2.8 1.65" value="Square" rotation="0 -90 0" color="#C62828" width="1.2"
+            align="center"></a-text>
+        <a-text position="5.84 2.8 2" value="Circle" rotation="0 -90 0" color="#0D47A1" width="1.2"
+            align="center"></a-text>
+        <a-text position="5.84 2.8 2.35" value="Cylinder" rotation="0 -90 0" color="#1B5E20" width="1.2"
+            align="center"></a-text>
+        <a-text position="5.84 2.5 2" value="THINK & CREATE" rotation="0 -90 0" color="#E65100" width="2"
+            align="center"></a-text>
+
+        <!-- Chart 8: Colors chart (right wall, above window) -->
+        <a-box position="5.88 4.6 -3" width="0.04" height="0.7" depth="1.8" color="#FFFFFF"></a-box>
+        <a-box position="5.86 4.6 -3" width="0.02" height="0.8" depth="0.06" color="#333"></a-box>
+        <a-box position="5.86 5.0 -3" width="0.02" height="0.06" depth="1.8" color="#333"></a-box>
+        <a-box position="5.86 4.2 -3" width="0.02" height="0.06" depth="1.8" color="#333"></a-box>
+        <a-text position="5.84 4.85 -3" value="RAINBOW COLORS" rotation="0 -90 0" color="#333" width="2"
+            align="center"></a-text>
+        <!-- Color swatches -->
+        <a-box position="5.83 4.45 -3.6" width="0.01" height="0.25" depth="0.2" color="#F44336"></a-box>
+        <a-box position="5.83 4.45 -3.35" width="0.01" height="0.25" depth="0.2" color="#FF9800"></a-box>
+        <a-box position="5.83 4.45 -3.1" width="0.01" height="0.25" depth="0.2" color="#FFEB3B"></a-box>
+        <a-box position="5.83 4.45 -2.85" width="0.01" height="0.25" depth="0.2" color="#4CAF50"></a-box>
+        <a-box position="5.83 4.45 -2.6" width="0.01" height="0.25" depth="0.2" color="#2196F3"></a-box>
+        <a-box position="5.83 4.45 -2.4" width="0.01" height="0.25" depth="0.2" color="#3F51B5"></a-box>
+        <a-text position="5.84 4.25 -3" value="VIBGYOR" rotation="0 -90 0" color="#7B1FA2" width="2.5"
+            align="center"></a-text>
+
+        <!-- ── FRONT WALL CHARTS (beside door) ── -->
+
+        <!-- Chart 9: Class Rules (front wall, left of door) -->
+        <a-box position="-3.5 3 5.88" width="1.4" height="1.6" depth="0.04" color="#E0F7FA"></a-box>
+        <a-box position="-3.5 3 5.9" width="0.06" height="1.7" depth="0.02" color="#00695C"></a-box>
+        <a-box position="-3.5 3.8 5.9" width="1.4" height="0.06" depth="0.02" color="#00695C"></a-box>
+        <a-box position="-3.5 2.2 5.9" width="1.4" height="0.06" depth="0.02" color="#00695C"></a-box>
+        <a-text position="-3.5 3.65 5.92" value="CLASS RULES" color="#00695C" width="2.5" align="center"></a-text>
+        <a-text position="-3.5 3.35 5.92" value="1. Be Kind" color="#333" width="1.8" align="center"></a-text>
+        <a-text position="-3.5 3.1 5.92" value="2. Listen Well" color="#333" width="1.8" align="center"></a-text>
+        <a-text position="-3.5 2.85 5.92" value="3. Raise Hand" color="#333" width="1.8" align="center"></a-text>
+        <a-text position="-3.5 2.6 5.92" value="4. Work Hard" color="#333" width="1.8" align="center"></a-text>
+        <a-text position="-3.5 2.35 5.92" value="5. Have Fun! ★" color="#E65100" width="1.8" align="center"></a-text>
+
+        <!-- Chart 10: Alphabet / ABCs (front wall, right of door) -->
+        <a-box position="3.5 3 5.88" width="1.4" height="1.6" depth="0.04" color="#F3E5F5"></a-box>
+        <a-box position="3.5 3 5.9" width="0.06" height="1.7" depth="0.02" color="#6A1B9A"></a-box>
+        <a-box position="3.5 3.8 5.9" width="1.4" height="0.06" depth="0.02" color="#6A1B9A"></a-box>
+        <a-box position="3.5 2.2 5.9" width="1.4" height="0.06" depth="0.02" color="#6A1B9A"></a-box>
+        <a-text position="3.5 3.65 5.92" value="STEM WORDS" color="#4A148C" width="2.5" align="center"></a-text>
+        <a-text position="3.5 3.35 5.92" value="S - Science" color="#E53935" width="1.8" align="center"></a-text>
+        <a-text position="3.5 3.1 5.92" value="T - Technology" color="#1565C0" width="1.8" align="center"></a-text>
+        <a-text position="3.5 2.85 5.92" value="E - Engineering" color="#2E7D32" width="1.8" align="center"></a-text>
+        <a-text position="3.5 2.6 5.92" value="M - Mathematics" color="#FF6F00" width="1.8" align="center"></a-text>
+        <a-text position="3.5 2.35 5.92" value="★ Innovate! ★" color="#7B1FA2" width="2" align="center"></a-text>
+
+        <!-- ═══════════ LIGHTING ═══════════ -->
+        <a-light type="ambient" color="#DDD" intensity="0.6"></a-light>
+        <a-light type="directional" position="2 5 2" intensity="0.4" color="#FFF8E1"></a-light>
+        <a-light type="directional" position="-2 4 -2" intensity="0.2" color="#E3F2FD"></a-light>
+
+        <!-- ═══════════ CAMERA ═══════════ -->
+        <a-entity position="0 1.6 5">
+            <a-camera look-controls wasd-controls="acceleration:20"></a-camera>
         </a-entity>
 
     </a-scene>
