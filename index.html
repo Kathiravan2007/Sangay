@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Young Innovators STEM Lab</title>
+    <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
+</head>
+
+<body>
+    <a-scene>
+
+        <!-- Sky background -->
+        <a-sky color="#87CEEB"></a-sky>
+
+        <!-- Floor -->
+        <a-box position="0 0 0" width="10" height="0.1" depth="10" color="#8B7355"></a-box>
+
+        <!-- Walls -->
+        <!-- Back wall -->
+        <a-box position="0 2.5 -5" width="10" height="5" depth="0.1" color="#E8E8E8"></a-box>
+
+        <!-- Left wall -->
+        <a-box position="-5 2.5 0" width="0.1" height="5" depth="10" color="#F0F0F0"></a-box>
+
+        <!-- Right wall -->
+        <a-box position="5 2.5 0" width="0.1" height="5" depth="10" color="#F0F0F0"></a-box>
+
+        <!-- Front wall (partial - with door opening) -->
+        <a-box position="-2.5 2.5 5" width="5" height="5" depth="0.1" color="#F0F0F0"></a-box>
+        <a-box position="3.5 3.5 5" width="3" height="3" depth="0.1" color="#F0F0F0"></a-box>
+
+        <!-- Ceiling -->
+        <a-box position="0 5 0" width="10" height="0.1" depth="10" color="#FFFFFF"></a-box>
+
+        <!-- Whiteboard on back wall -->
+        <a-box position="0 3 -4.9" width="4" height="2" depth="0.05"
+            src="https://www.teachoo.com/12837/3495/Double-Displacement-Reaction/category/Concepts/"></a-box>
+        <a-box position="0 3 -4.85" width="3.8" height="1.8" depth="0.02" rotation="0 180 0"
+            src="https://www.teachoo.com/12837/3495/Double-Displacement-Reaction/category/Concepts/"></a-box>
+
+        <!-- Teacher's Desk -->
+        <a-box position="0 0.4 -4" width="1.5" height="0.8" depth="0.8" color="#8B4513"></a-box>
+        <a-box position="0 0.8 -4" width="1.6" height="0.05" depth="0.9" color="#A0522D"></a-box>
+
+        <!-- Student Desks Row 1 (Left) -->
+        <a-box position="-2 0.4 -1" width="1.2" height="0.8" depth="0.6" color="#CD853F"></a-box>
+        <a-box position="-2 0.8 -1" width="1.3" height="0.05" depth="0.7" color="#DEB887"></a-box>
+
+        <a-box position="-2 0.4 1" width="1.2" height="0.8" depth="0.6" color="#CD853F"></a-box>
+        <a-box position="-2 0.8 1" width="1.3" height="0.05" depth="0.7" color="#DEB887"></a-box>
+
+        <!-- Student Desks Row 1 (Right) -->
+        <a-box position="2 0.4 -1" width="1.2" height="0.8" depth="0.6" color="#CD853F"></a-box>
+        <a-box position="2 0.8 -1" width="1.3" height="0.05" depth="0.7" color="#DEB887"></a-box>
+
+        <a-box position="2 0.4 1" width="1.2" height="0.8" depth="0.6" color="#CD853F"></a-box>
+        <a-box position="2 0.8 1" width="1.3" height="0.05" depth="0.7" color="#DEB887"></a-box>
+
+        <!-- Chairs for students (simple boxes) -->
+        <a-box position="-2 0.25 -0.3" width="0.4" height="0.5" depth="0.4" color="#654321"></a-box>
+        <a-box position="-2 0.25 1.7" width="0.4" height="0.5" depth="0.4" color="#654321"></a-box>
+        <a-box position="2 0.25 -0.3" width="0.4" height="0.5" depth="0.4" color="#654321"></a-box>
+        <a-box position="2 0.25 1.7" width="0.4" height="0.5" depth="0.4" color="#654321"></a-box>
+
+        <!-- Teacher's chair -->
+        <a-box position="0 0.3 -3.2" width="0.5" height="0.6" depth="0.5" color="#8B4513"></a-box>
+
+        <!-- Window on left wall -->
+        <a-box position="-4.95 3 -2" width="0.05" height="1.5" depth="2" color="#ADD8E6"></a-box>
+
+        <!-- Books on teacher's desk -->
+        <a-box position="-0.3 0.85 -4" width="0.2" height="0.1" depth="0.3" color="#FF6347"></a-box>
+        <a-box position="-0.1 0.85 -4" width="0.2" height="0.1" depth="0.3" color="#4169E1"></a-box>
+
+        <!-- Clock on back wall -->
+        <a-cylinder position="3 4 -4.9" radius="0.3" height="0.1" rotation="0 0 0" color="#333333"></a-cylinder>
+        <a-cylinder position="3 4 -4.85" radius="0.25" height="0.05" rotation="0 0 0" color="#FFFFFF"></a-cylinder>
+
+        <!-- TEACHER -->
+        <!-- Teacher body (standing) -->
+        <a-box position="-1.2 1.3 -3.8" width="0.4" height="0.8" depth="0.3" color="#2E5090"></a-box>
+        <!-- Teacher head -->
+        <a-sphere position="-1.2 1.9 -3.8" radius="0.15" color="#FDBCB4"></a-sphere>
+        <!-- Teacher arms -->
+        <a-cylinder position="-1.4 1.4 -3.8" radius="0.05" height="0.5" rotation="0 0 45" color="#FDBCB4"></a-cylinder>
+        <a-cylinder position="-1.0 1.4 -3.8" radius="0.05" height="0.5" rotation="0 0 -45" color="#FDBCB4"></a-cylinder>
+        <!-- Teacher legs -->
+        <a-cylinder position="-1.3 0.7 -3.8" radius="0.06" height="0.6" color="#1A3A6E"></a-cylinder>
+        <a-cylinder position="-1.1 0.7 -3.8" radius="0.06" height="0.6" color="#1A3A6E"></a-cylinder>
+
+        <!-- STUDENT 1 (Left front desk - sitting) -->
+        <!-- Body -->
+        <a-box position="-2 1.1 -1" width="0.3" height="0.5" depth="0.25" color="#FF6B9D"></a-box>
+        <!-- Head -->
+        <a-sphere position="-2 1.5 -1" radius="0.12" color="#F4C2A1"></a-sphere>
+        <!-- Arms -->
+        <a-cylinder position="-2.15 1.15 -1" radius="0.04" height="0.35" rotation="0 0 20" color="#F4C2A1"></a-cylinder>
+        <a-cylinder position="-1.85 1.15 -1" radius="0.04" height="0.35" rotation="0 0 -20"
+            color="#F4C2A1"></a-cylinder>
+        <!-- Legs (sitting) -->
+        <a-cylinder position="-2.1 0.7 -0.9" radius="0.05" height="0.4" rotation="90 0 0" color="#4A4A4A"></a-cylinder>
+        <a-cylinder position="-1.9 0.7 -0.9" radius="0.05" height="0.4" rotation="90 0 0" color="#4A4A4A"></a-cylinder>
+
+        <!-- STUDENT 2 (Left back desk - sitting) -->
+        <!-- Body -->
+        <a-box position="-2 1.1 1" width="0.3" height="0.5" depth="0.25" color="#4ECDC4"></a-box>
+        <!-- Head -->
+        <a-sphere position="-2 1.5 1" radius="0.12" color="#D4A373"></a-sphere>
+        <!-- Arms -->
+        <a-cylinder position="-2.15 1.15 1" radius="0.04" height="0.35" rotation="0 0 20" color="#D4A373"></a-cylinder>
+        <a-cylinder position="-1.85 1.15 1" radius="0.04" height="0.35" rotation="0 0 -20" color="#D4A373"></a-cylinder>
+        <!-- Legs (sitting) -->
+        <a-cylinder position="-2.1 0.7 1.1" radius="0.05" height="0.4" rotation="90 0 0" color="#2C3E50"></a-cylinder>
+        <a-cylinder position="-1.9 0.7 1.1" radius="0.05" height="0.4" rotation="90 0 0" color="#2C3E50"></a-cylinder>
+
+        <!-- STUDENT 3 (Right front desk - sitting) -->
+        <!-- Body -->
+        <a-box position="2 1.1 -1" width="0.3" height="0.5" depth="0.25" color="#FFD93D"></a-box>
+        <!-- Head -->
+        <a-sphere position="2 1.5 -1" radius="0.12" color="#F4C2A1"></a-sphere>
+        <!-- Arms -->
+        <a-cylinder position="1.85 1.15 -1" radius="0.04" height="0.35" rotation="0 0 20" color="#F4C2A1"></a-cylinder>
+        <a-cylinder position="2.15 1.15 -1" radius="0.04" height="0.35" rotation="0 0 -20" color="#F4C2A1"></a-cylinder>
+        <!-- Legs (sitting) -->
+        <a-cylinder position="1.9 0.7 -0.9" radius="0.05" height="0.4" rotation="90 0 0" color="#8B4513"></a-cylinder>
+        <a-cylinder position="2.1 0.7 -0.9" radius="0.05" height="0.4" rotation="90 0 0" color="#8B4513"></a-cylinder>
+
+        <!-- STUDENT 4 (Right back desk - sitting) -->
+        <!-- Body -->
+        <a-box position="2 1.1 1" width="0.3" height="0.5" depth="0.25" color="#95E1D3"></a-box>
+        <!-- Head -->
+        <a-sphere position="2 1.5 1" radius="0.12" color="#E8B89A"></a-sphere>
+        <!-- Arms -->
+        <a-cylinder position="1.85 1.15 1" radius="0.04" height="0.35" rotation="0 0 20" color="#E8B89A"></a-cylinder>
+        <a-cylinder position="2.15 1.15 1" radius="0.04" height="0.35" rotation="0 0 -20" color="#E8B89A"></a-cylinder>
+        <!-- Legs (sitting) -->
+        <a-cylinder position="1.9 0.7 1.1" radius="0.05" height="0.4" rotation="90 0 0" color="#34495E"></a-cylinder>
+        <a-cylinder position="2.1 0.7 1.1" radius="0.05" height="0.4" rotation="90 0 0" color="#34495E"></a-cylinder>
+
+        <!-- Lighting -->
+        <a-light type="ambient" color="#BBB"></a-light>
+        <a-light type="directional" position="2 4 1" intensity="0.5"></a-light>
+
+        <!-- Camera with WASD controls -->
+        <a-entity position="0 1.6 4">
+            <a-camera look-controls wasd-controls></a-camera>
+        </a-entity>
+
+    </a-scene>
+</body>
+
+</html>
