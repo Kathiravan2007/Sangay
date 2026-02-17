@@ -146,6 +146,36 @@
         <a-entity position="0 1.6 4">
             <a-camera look-controls wasd-controls></a-camera>
         </a-entity>
+        <!-- ======================================= -->
+        <!-- CAMERA + CONTROLLER RIG                 -->
+        <!-- Paste INSIDE <a-scene> at the TOP       -->
+        <!-- ======================================= -->
+
+        <!-- "rig" = Your VR body (head + both hands) -->
+        <!-- movement-controls: Enables WASD keyboard + VR thumbstick movement -->
+        <!-- position: Starting position at the door -->
+        <!-- Think of it like your character in a video game -->
+        <a-entity id="rig" movement-controls="fly: false; speed: 0.15" position="0 0 4">
+
+            <!-- VR Camera = Your Eyes/Head -->
+            <!-- position="0 1.6 0" = 1.6 meters tall (average human eye height) -->
+            <!-- look-controls = Move your head (VR) or drag mouse (desktop) to look around -->
+            <!-- wasd-controls = Use WASD keys on Windows keyboard to move -->
+            <!-- Think: This is your first-person POV like in Call of Duty -->
+            <a-entity camera position="0 1.6 0" look-controls wasd-controls="acceleration: 20">
+            </a-entity>
+
+            <!-- LEFT CONTROLLER = Your Left Hand in VR (Meta Quest) -->
+            <a-entity id="leftController" meta-touch-controls="hand: left" laser-controls="hand: left"
+                raycaster="objects: .clickable; far: 20" line="color: cyan">
+            </a-entity>
+
+            <!-- RIGHT CONTROLLER = Your Right Hand in VR (Meta Quest) -->
+            <a-entity id="rightController" meta-touch-controls="hand: right" laser-controls="hand: right"
+                raycaster="objects: .clickable; far: 20" line="color: magenta">
+            </a-entity>
+
+        </a-entity>
 
     </a-scene>
 </body>
